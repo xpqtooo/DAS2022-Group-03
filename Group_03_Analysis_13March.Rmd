@@ -1,0 +1,359 @@
+---
+title: "Project-2"
+output:
+  word_document: default
+  pdf_document:
+    number_sections: yes
+    latex_engine: xelatex
+fig_caption: yes
+---
+
+
+```{r setup, include=FALSE, eval = TRUE}
+knitr::opts_chunk$set(echo = FALSE, eval = TRUE, warning=FALSE, message=FALSE)
+```
+
+
+```{r,echo = TRUE,message=FALSE}
+library(dplyr)
+library(moderndive)
+library(ISLR)
+library(skimr)
+library(plotly)
+library(tidyr)
+library(jtools)
+library(kableExtra)
+#install.packages("corrplot")
+library(corrplot)
+library(ggplot2)
+```
+
+# Introduction
+In this analysis, we are going to analysis which variables have influence on the member numbers of households in the region of **Northern Mindanao** in Philippines.
+
+Since the response variable is a count data, not continuous any more. It is suitable to fit a GLM model, particularly a Poisson model.
+
+# Exploratory analysis
+
+```{r,}
+
+# Dataset prepare
+data <- read.csv("dataset3.csv")
+
+# Ignore the region and rename
+household <- data[,-2]
+colnames(household) <- c("Income", "Food.exp", "Head.sex", "Head.age", "Type", "Members.no", "Area", 
+                         "House.age", "Bedrooms.no", "Elec.")
+
+# Check is there any NA in data
+cat("\n Check is there any NA in data \n")
+apply(household, 2, function(x) any(is.na(x))) # No NAs in data
+
+# Move our response variable to the first
+household <- household %>%
+  relocate("Members.no") # Use dplyr::relocate to move to the front
+head(household) %>%   
+  kable(digits = 2) %>%
+  kable_styling(latex_options = 'HOLD_position')
+
+```
+
+```{r, fig.width = 6, fig.height = 4, fig.align = "center", fig.pos = "H"}
+# summary of response varibale
+household %>% select(Members.no)%>%
+  skim()
+unique(household$Members.no)
+
+# From summary, the mean is 4.68, and the variance is 2.3**2 = 5.29 > 4.68.
+# In the Poisson distribution, the variance equals to the mean, but our data is a little bit higher.
+# Hence, it may be better to check the over-dispersion problem after modeling.
+
+max.no <- max(household$Members.no)
+ggplot(household, aes(x = Members.no)) +
+  # Set bins as max(Members.no)
+  geom_histogram(bins = max.no, fill = "#0038A8", col = "white") +
+  labs(main = "Total number of family members in Northern Mindanao")
+```
+
+
+## Check our categorical variables with Y
+### Check Head.sex vs. Member.no
+
+```{r, fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+#Boxplot
+ggplot(data = household, aes(x = Head.sex, y = Members.no, fill = Head.sex)) +
+    geom_boxplot() +
+    labs(x = "Head.sex", y = "Members.no")+ 
+    theme(legend.position = "none", title = element_text(size = 16))
+```
+Short conclusion:
+Head.sex may be a good predictor, since the upper 50% of Males has no overlap with the lower 75% of Females.
+
+### Check Type vs. Member.no
+
+```{r,fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+ggplot(data = household, aes(x = Type, y = Members.no, fill = Type)) +
+    geom_boxplot() +
+    labs(x = "Type", y = "Members.no")+ 
+    theme(legend.position = "none", title = element_text(size = 16))
+```
+Short conclusion:
+Single family obviously has fewer members, while the other two groups have more people.
+Bacause there is large overlapping between *extended* and *two or more nonrelated*, we try to combine them into one group:
+
+```{r, fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+# Add a new group col
+household <- household %>% 
+  mutate(Type.single = ifelse(Type=="Single Family", "Yes", "No"))
+
+ggplot(data = household, aes(x = Type.single, y = Members.no, fill = Type.single)) +
+    geom_boxplot() +
+    labs(x = "Type single", y = "Members.no")+ 
+    theme(legend.position = "none", title = element_text(size = 16))
+```
+Short conclusion:
+After regrouping, the two groups have less overlapping.
+Thus, the new covariate may be a good predictor.
+
+### Check Electricity vs. Member.no
+
+```{r, fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+#Boxplot
+ggplot(data = household, aes(x = as.factor(Elec.), y = Members.no, fill = as.factor(Elec.))) +
+    geom_boxplot() +
+    labs(x = "Electricity", y = "Members.no")+ 
+    theme(legend.position = "none", title = element_text(size = 16))
+
+```
+Short conclusion:
+Elec. is not desirable, since its two groups have large overlapping. 
+
+## Check the relationships between our continuous variables \
+### Check Y vs. Xs
+
+```{r,  fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+#Corrplot
+household %>%
+    select_if(is.numeric) %>%
+    select(-Elec.) %>%
+    cor() %>%
+    # Code reference:
+    # http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram
+    corrplot(type="upper",
+             addCoef.col = "black", # Add coefficient of correlation
+             tl.col="black", tl.srt=45, #Text label color and rotation
+             diag=FALSE) # hide correlation coefficient on the principal diagonal
+
+```
+
+From above we can see:
+
+- Y is moderately correlated with *Food.exp*, slightly correlated with *Income*, *Head.age*, *House.age*, *Bedrooms.no*
+- Y has no obvious correlation with *Area*
+- Between Xs, *Income* and *Food.exp* have strong relations. And both of them have moderate correlations with *Area* and *Bedroom*.
+
+```{r, fig.width = 12, fig.height = 18, fig.align = "center", fig.pos = "H"}
+library(gridExtra)
+p1 <- ggplot(household, aes(x=Income, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+p2 <- ggplot(household, aes(x=Food.exp, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+p3 <- ggplot(household, aes(x=Head.age, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+p4 <- ggplot(household, aes(x=Area, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+p5 <- ggplot(household, aes(x=House.age, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+p6 <- ggplot(household, aes(x=Bedrooms.no, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16))
+
+# grid.arrange(p1, p2, p3, p4, p5, p6,  ncol = 2)
+
+```
+
+```{r, fig.width = 12, fig.height = 6}
+# Food.exp
+p2 + geom_smooth(method = "lm", se = FALSE, color = "#FCD116", size = 1.5)
+```
+
+```{r, fig.width = 12, fig.height = 6}
+# Area, House.age, Bedrooms.no
+grid.arrange(p4, p5, p6,  ncol = 3)
+```
+*Area*, *House.age*, *Bedrooms.no* appear no useful patterns.
+
+```{r, fig.width = 12, fig.height = 6}
+# Area, House.age, Bedrooms.no
+grid.arrange(p1, p3,  ncol = 2)
+```
+
+From the last one to the first:
+
+- *Food.exp* could be chosen. **There is a moderate trend in more expenditure of food more members in a household.**
+
+- *Area*, *House.age*, *Bedrooms.no*  are not a good explanatory variable, since there are no significant relations with the Members.no.
+
+- *Income* is not an excellent predictor, with positive trend in fewer-member data but negative trend in more-member ones.
+
+- *Head.age* should be checked later, since there are significantly different patterns among Ys. **However, the data should to be transformed**.
+
+
+### Further transformed of Head.age
+```{r, fig.width = 12, fig.height = 6}
+Mean.age <- mean(household$Head.age) # 51.52
+household <- household %>% mutate(Head.age.diff.abs = abs(Head.age - Mean.age))
+
+p1 <- ggplot(household, aes(x=Food.exp, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16)) + 
+  geom_smooth(method = "lm", se = FALSE, color = "#FCD116", size = 1.5)
+
+p2 <- ggplot(household, aes(x=Head.age.diff.abs, y=Members.no)) +
+  geom_jitter(col = "#0038A8") +
+  theme(title = element_text(size = 16)) +
+  geom_smooth(method = "lm", se = FALSE, color = "#FCD116", size = 1.5)
+
+grid.arrange(p1, p2,  ncol = 2)
+
+```
+
+```{r,  fig.width = 9, fig.height = 6, fig.align = "center", fig.pos = "H"}
+#Corrplot
+household %>%
+    select(Members.no, Food.exp, Head.age.diff.abs) %>%
+    cor() %>%
+    corrplot(type="upper",
+             addCoef.col = "black", # Add coefficient of correlation
+             tl.col="black", tl.srt=45, #Text label color and rotation
+             diag=FALSE) # hide correlation coefficient on the principal diagonal
+
+```
+
+Short conclusion:
+
+Among continuous variabls, *Food.exp*  and *Head.age.diff.abs* may be better.
+
+## Contemporary summary
+
+
+```{r,  fig.width = 9, fig.height = 9, fig.align = "center", fig.pos = "H"}
+
+# Two discrete variables
+p1 <- ggplot(data = household, aes(x = Members.no, fill = Head.sex)) +
+    # Set dodge to side-by-side plot
+    geom_histogram(position = "dodge", color = "white") +
+    labs(title = "The histogram by the sex of household head") +
+    theme(title = element_text(size = 10), legend.position = "bottom")
+
+p2 <- ggplot(data = household, aes(x = Members.no, fill=Type.single)) +
+    geom_histogram(position = "dodge", color = "white") +
+    labs(title = "The histogram by the type of relationships between household members") +
+    theme(title = element_text(size = 10), legend.position = "bottom")
+
+# Two continuous variables
+p3 <- ggplot(household, aes(x = factor(Members.no), y = Food.exp)) +
+  geom_boxplot(fill = "orange", color = "#343D3E") +
+  labs(x = "Members.no", y = "Food.exp (peso)",
+        title = "The boxplots of total food expenditure") +
+  theme(title = element_text(size = 10))
+
+p4 <- ggplot(household, aes(x = factor(Members.no), y = Head.age.diff.abs)) +
+  geom_boxplot(fill = "#91C46C", color = "#343D3E") +
+  labs(x = "Members.no", y = "Head.age.diff.abs",
+        title = "The boxplots of abs(Head.age - Mean.age)") +
+  theme(title = element_text(size = 10))
+
+grid.arrange(p1, p2, p3, p4,  ncol = 2)
+
+```
+
+
+Until now, the possible explanatory variables are:
+
+- discrete: *Head.sex* (p1) and *Type.single* (p2)
+
+- continuous: *Food.exp* (p3) and *Head.age.diff.abs* (p4)
+
+
+# Modelling
+Note by Huan: Maybe Poisson model is more appropriate? The meeting can be discussed together~~
+The modelling details are all there, confidence intervals and predictions are done, thanks for xuan working hard!
+
+```{r,echo = FALSE}
+library("janitor")
+
+data_cut <- household[order(household$Members.no, decreasing = T),]
+data_cut <- data_cut %>%
+    mutate(Num2 = data$Total.Number.of.Family.members)
+data_cut[,"Num2"] <- ifelse(data_cut[,"Num2"] > median(data_cut[,"Num2"]),"High","Low")
+
+data_sex2 <- data_cut %>%
+    select(Num2, Household.Head.Sex)
+
+#look
+data_sex2 %>% 
+  tabyl(Household.Head.Sex, Num2) %>% 
+  adorn_percentages() %>% 
+  adorn_pct_formatting() %>% 
+  adorn_ns()
+
+ggplot(data_sex2, aes(x= Num2,  y = ..prop.., group=Household.Head.Sex, fill=Household.Head.Sex)) + 
+    geom_bar(position="dodge", stat="count") +
+    labs(y = "Proportion")
+
+model_sex2 <- glm(Num2 ~ Household.Head.Sex, data = data_sex2, family = binomial(link = "logit"))
+model_sex2 %>%
+  summary()
+levels(data_sex2$Household.Head.Sex)
+confint(model_sex2) %>%
+  kable()
+
+mod.ethnic.coef.logodds <- model_sex2 %>%
+                            summary() %>%
+                            coef()
+
+mod.ethnic.coef.logodds <- model_sex2 %>%
+                            summary() %>%
+                            coef()
+
+mod.ethnic.coef.logodds <- model_sex2 %>%
+                            summary() %>%
+                            coef()
+
+plot_model(model_sex2, show.values = TRUE, transform = NULL,
+           title = "Log-Odds (Male instructor)", show.p = FALSE)
+```
+
+#Cut 5
+```{r,echo = FALSE}
+data_cut <- read.csv("C:/Users/Seismic/Downloads/dataset3.csv")
+data_cut <- data_cut %>%
+    mutate(Num5 = data$Total.Number.of.Family.members)
+data_cut<-data_cut[order(data_cut$Num5,decreasing = T),]
+data_cut$Num5<-cut(data_cut$Num5,breaks=c(1,3,6,10,16),labels=c('low1','low2','high1','high2'))
+
+
+
+model_sex3 <-  multinom(Num5 ~ Household.Head.Sex, data = data_cut, probabilities = TRUE, model = TRUE)
+summary(model_sex3)
+Anova(model_type)
+round(odds.ratio(model_type),2)
+
+```
+
+#Poisson model
+```{r}
+
+```
+
