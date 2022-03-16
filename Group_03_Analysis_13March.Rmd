@@ -290,7 +290,7 @@ nrow(household) #1884
 # Get the correlation pattern
 ggpairs(household[,c("Income.log", "Food.exp.log", "Head.age", "House.age.log")]) 
 ```
-```
+
 Short conclusion:
 
 Among numerical variabls, *Income*, *Food.exp*, *Head.age*, *House.age* may be better.
