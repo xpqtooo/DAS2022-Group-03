@@ -364,8 +364,4 @@ round(odds.ratio(model_type),2)
 
 ```
 
-#Poisson model
-```{r}
-
-```
 
